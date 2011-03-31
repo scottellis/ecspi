@@ -90,12 +90,14 @@ static int ecspi_queue_spi_write(void)
 	ecspi_ctl.msg.complete = ecspi_completion_handler;
 	ecspi_ctl.msg.context = NULL;
 
+	/* the data is bogus for initial testing */
 	for (i = 0; i < 512; i++)
 		ecspi_ctl.tx_buff[i] = i;
 		
 	ecspi_ctl.transfer[0].tx_buf = ecspi_ctl.tx_buff;
 	ecspi_ctl.transfer[0].rx_buf = NULL;
 	ecspi_ctl.transfer[0].len = 192;
+        /* pulse the cs line between the two transfers */
 	ecspi_ctl.transfer[0].cs_change = 1;
 
 	ecspi_ctl.transfer[1].tx_buf = &ecspi_ctl.tx_buff[256];
@@ -134,6 +136,7 @@ static enum hrtimer_restart ecspi_timer_callback(struct hrtimer *timer)
 		return HRTIMER_NORESTART;
 	}
 
+	/* in the real implementation, this next delay will be variable */
 	hrtimer_forward_now(&ecspi_dev.timer, 
 		ktime_set(ecspi_dev.timer_period_sec, 
 			ecspi_dev.timer_period_ns));
@@ -229,6 +232,9 @@ static ssize_t ecspi_write(struct file *filp, const char __user *buff,
 		hrtimer_cancel(&ecspi_dev.timer);
 		ecspi_dev.running = 0;
 	}
+	/* The real implementation will also accept the raw data with
+	   delay intervals via this write or maybe from an ioctl. TBD.
+	*/
 
 ecspi_write_done:
 
