@@ -1,9 +1,9 @@
 if [[ -z "${KERNEL_CROSS_BUILD_ENVIRONMENT_SOURCED}" ]]; then
 
 	MACHINE=overo
-
+	
  	OETMP=${OVEROTOP}/tmp
-	#OETMP=/gum	
+	#OETMP=/oe3	
 
 	SYSROOTSDIR=${OETMP}/sysroots
 	STAGEDIR=${SYSROOTSDIR}/`uname -m`-linux/usr
