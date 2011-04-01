@@ -7,13 +7,57 @@ computers.
   Kernel Config
 -------
 
-The default gumstix kernels assign drivers to the two SPI Bus 1 CS 0 and 1 pins
-that are exposed on the expansion card header.
+The default gumstix kernels assign drivers to the two SPI CS pins that are 
+exposed on the expansion card header.
 
-Since only one SPI driver can be assigned to a BUS.CS pin, the ecspi module 
-won't load unless you have a modified kernel.
+Since only one SPI driver can be assigned to each BUS.CS pin, the ecspi module 
+won't load unless you first modify your kernel.
 
-If you building from the latest gumstix kernel, linux-omap3-2.6.36, then the
+This is the code in the board-overo.c file that we have to disable.
+
+	static struct spi_board_info overo_spi_board_info[] __initdata = {
+	#if defined(CONFIG_TOUCHSCREEN_ADS7846) || \
+		defined(CONFIG_TOUCHSCREEN_ADS7846_MODULE)
+		{
+			.modalias		= "ads7846",
+			.bus_num		= 1,
+			.chip_select		= 0,
+			.max_speed_hz		= 1500000,
+			.controller_data	= &ads7846_mcspi_config,
+			.irq			= OMAP_GPIO_IRQ(OVERO_GPIO_PENDOWN),
+			.platform_data		= &ads7846_config,
+		},
+	#elif defined(CONFIG_SPI_SPIDEV) || defined(CONFIG_SPI_SPIDEV_MODULE)
+		{
+			.modalias		= "spidev",
+			.bus_num		= 1,
+			.chip_select		= 0,
+			.max_speed_hz		= 1000000,
+			.mode			= SPI_MODE_0,
+		},
+	#endif
+	#if defined(CONFIG_PANEL_LGPHILIPS_LB035Q02) || \
+		defined(CONFIG_PANEL_LGPHILIPS_LB035Q02_MODULE)
+		{
+			.modalias		= "lgphilips_lb035q02_panel-spi",
+			.bus_num		= 1,
+			.chip_select		= 1,
+			.max_speed_hz		= 500000,
+			.mode			= SPI_MODE_3,
+		},
+	#elif defined(CONFIG_SPI_SPIDEV) || defined(CONFIG_SPI_SPIDEV_MODULE)
+		{
+			.modalias		= "spidev",
+			.bus_num		= 1,
+			.chip_select		= 1,
+			.max_speed_hz		= 1000000,
+			.mode			= SPI_MODE_0,
+		},
+	#endif
+	};
+
+
+If you are building from the latest gumstix kernel, linux-omap3-2.6.36, then the
 changes to the defconfig can be accomplished with the following sed calls.
 
 	sed -i 's:CONFIG_TOUCHSCREEN_ADS7846=m:# CONFIG_TOUCHSCREEN_ADS7846 is not set:g' defconfig
