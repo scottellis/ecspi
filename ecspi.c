@@ -37,6 +37,8 @@
 #define SPI_BUS_CS1 1
 #define SPI_BUS_SPEED 12000000
 
+#define TRANSFERS_PER_MESSAGE 96
+
 #define DEFAULT_WRITE_FREQUENCY 100
 static int write_frequency = DEFAULT_WRITE_FREQUENCY;
 module_param(write_frequency, int, S_IRUGO);
@@ -47,7 +49,7 @@ const char this_driver_name[] = "ecspi";
 
 struct ecspi_control {
 	struct spi_message msg;
-	struct spi_transfer transfer[2];
+	struct spi_transfer *transfer;
 	u32 busy;
 	u32 spi_callbacks;
 	u32 busy_counter;
@@ -90,22 +92,14 @@ static int ecspi_queue_spi_write(void)
 	ecspi_ctl.msg.complete = ecspi_completion_handler;
 	ecspi_ctl.msg.context = NULL;
 
-	/* the data is bogus for initial testing */
-	for (i = 0; i < 512; i++)
-		ecspi_ctl.tx_buff[i] = i;
-		
-	ecspi_ctl.transfer[0].tx_buf = ecspi_ctl.tx_buff;
-	ecspi_ctl.transfer[0].rx_buf = NULL;
-	ecspi_ctl.transfer[0].len = 192;
-        /* pulse the cs line between the two transfers */
-	ecspi_ctl.transfer[0].cs_change = 1;
-
-	ecspi_ctl.transfer[1].tx_buf = &ecspi_ctl.tx_buff[256];
-	ecspi_ctl.transfer[1].rx_buf = NULL;
-	ecspi_ctl.transfer[1].len = 192;
+	for (i = 0; i < TRANSFERS_PER_MESSAGE; i++) {		
+		ecspi_ctl.transfer[i].tx_buf = &ecspi_ctl.tx_buff[i * 4];
+		ecspi_ctl.transfer[i].rx_buf = NULL;
+		ecspi_ctl.transfer[i].len = 4;
+		ecspi_ctl.transfer[i].cs_change = 1;
 	
-	spi_message_add_tail(&ecspi_ctl.transfer[0], &ecspi_ctl.msg);
-	spi_message_add_tail(&ecspi_ctl.transfer[1], &ecspi_ctl.msg);
+		spi_message_add_tail(&ecspi_ctl.transfer[i], &ecspi_ctl.msg);
+	}
 
 	spin_lock_irqsave(&ecspi_dev.spi_lock, flags);
 
@@ -142,6 +136,29 @@ static enum hrtimer_restart ecspi_timer_callback(struct hrtimer *timer)
 			ecspi_dev.timer_period_ns));
 	
 	return HRTIMER_RESTART;
+}
+
+static void ecspi_start_timer(void)
+{
+	int i;
+
+	/* the data is bogus for initial testing */
+	for (i = 0; i < TRANSFERS_PER_MESSAGE; i+= 4) {
+		ecspi_ctl.tx_buff[i] = 0xAA;
+		ecspi_ctl.tx_buff[i+1] = 0x66;
+		ecspi_ctl.tx_buff[i+2] = 0x55;
+		ecspi_ctl.tx_buff[i+3] = 0x99;		
+	}
+
+	ecspi_ctl.spi_callbacks = 0;		
+	ecspi_ctl.busy_counter = 0;
+
+	hrtimer_start(&ecspi_dev.timer, 
+			ktime_set(ecspi_dev.timer_period_sec, 
+				ecspi_dev.timer_period_ns),
+                       	HRTIMER_MODE_REL);
+
+	ecspi_dev.running = 1; 
 }
 
 static ssize_t ecspi_read(struct file *filp, char __user *buff, size_t count,
@@ -218,15 +235,7 @@ static ssize_t ecspi_write(struct file *filp, const char __user *buff,
 			goto ecspi_write_done;
 		}
 
-		ecspi_ctl.spi_callbacks = 0;		
-		ecspi_ctl.busy_counter = 0;
-
-		hrtimer_start(&ecspi_dev.timer, 
-				ktime_set(ecspi_dev.timer_period_sec, 
-					ecspi_dev.timer_period_ns),
-        	               	HRTIMER_MODE_REL);
-
-		ecspi_dev.running = 1; 
+		ecspi_start_timer();
 	} 
 	else if (!strnicmp(ecspi_dev.user_buff, "stop", 4)) {
 		hrtimer_cancel(&ecspi_dev.timer);
@@ -375,6 +384,17 @@ static int __init ecspi_init_spi(void)
 		goto ecspi_init_error;
 	}
 
+	ecspi_ctl.transfer = kmalloc(TRANSFERS_PER_MESSAGE 
+						* sizeof(struct spi_transfer),
+					GFP_KERNEL);
+	if (!ecspi_ctl.transfer) {
+		error = -ENOMEM;
+		goto ecspi_init_error;
+	}
+	
+	memset(ecspi_ctl.transfer, 0, TRANSFERS_PER_MESSAGE 
+						* sizeof(struct spi_transfer));
+
 	error = spi_register_driver(&ecspi_driver);
 	if (error < 0) {
 		printk(KERN_ALERT "spi_register_driver() failed %d\n", error);
@@ -395,6 +415,11 @@ ecspi_init_error:
 	if (ecspi_ctl.tx_buff) {
 		kfree(ecspi_ctl.tx_buff);
 		ecspi_ctl.tx_buff = 0;
+	}
+
+	if (ecspi_ctl.transfer) {
+		kfree(ecspi_ctl.transfer);
+		ecspi_ctl.transfer = 0;
 	}
 
 	return error;
@@ -519,6 +544,11 @@ static void __exit ecspi_exit(void)
 
 	if (ecspi_ctl.tx_buff)
 		kfree(ecspi_ctl.tx_buff);
+
+	if (ecspi_ctl.transfer) {
+		kfree(ecspi_ctl.transfer);
+		ecspi_ctl.transfer = 0;
+	}
 
 	if (ecspi_dev.user_buff)
 		kfree(ecspi_dev.user_buff);
